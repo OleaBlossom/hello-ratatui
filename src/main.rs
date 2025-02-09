@@ -13,123 +13,149 @@
 //! [examples]: https://github.com/ratatui/ratatui/blob/main/examples
 //! [examples readme]: https://github.com/ratatui/ratatui/blob/main/examples/README.md
 
-use std::{
-    io::{self},
-    time::{Duration, Instant},
-};
+use std::io::{self};
 
-use color_eyre::Result;
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    buffer::Buffer,
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     layout::Rect,
-    style::Color,
-    widgets::{
-        canvas::{Canvas, Circle},
-        Block, Widget,
-    },
+    style::Stylize,
+    symbols::border,
+    text::{Line, Text},
+    widgets::{Block, Paragraph, Widget},
     DefaultTerminal, Frame,
 };
 
-fn main() -> Result<()> {
-    color_eyre::install()?;
-    let terminal = ratatui::init();
-    let app_result = App::new().run(terminal);
+fn main() -> io::Result<()> {
+    let mut terminal = ratatui::init();
+    let app_result = App::default().run(&mut terminal);
     ratatui::restore();
     app_result
 }
-
-#[derive(Debug)]
-struct App {
-    should_exit: bool,
-    last_tick: Instant,
-    ball: Circle,
-    playground: Rect,
-    vx: f64,
-    vy: f64,
-    tick_count: u64,
+#[derive(Debug, Default)]
+pub struct App {
+    counter: u8,
+    exit: bool,
 }
 
 impl App {
-    /// The duration between each tick.
-    const TICK_RATE: Duration = Duration::from_millis(50);
-
-    /// Create a new instance of the app.
-    fn new() -> Self {
-        Self {
-            should_exit: false,
-            last_tick: Instant::now(),
-            ball: Circle {
-                x: 20.0,
-                y: 40.0,
-                radius: 10.0,
-                color: Color::LightMagenta,
-            },
-            playground: Rect::new(10, 10, 200, 100),
-            vx: 1.0,
-            vy: 1.0,
-            tick_count: 0,
-        }
-    }
-
-    /// Run the app until the user exits.
-    fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        while !self.should_exit {
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
-            if self.last_tick.elapsed() >= Self::TICK_RATE {
-                self.on_tick();
-                self.last_tick = Instant::now();
-            }
         }
+
         Ok(())
     }
 
-    /// Handle events from the terminal.
+    fn draw(&self, frame: &mut Frame<'_>) {
+        frame.render_widget(self, frame.area());
+    }
+
     fn handle_events(&mut self) -> io::Result<()> {
-        let timeout = Self::TICK_RATE.saturating_sub(self.last_tick.elapsed());
-        while event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
-                    self.should_exit = true;
-                }
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
             }
-        }
+            _ => {}
+        };
+
         Ok(())
     }
 
-    /// Update the app state on each tick.
-    fn on_tick(&mut self) {
-        self.tick_count += 1;
-
-        // bounce the ball by flipping the velocity vector
-        let ball = &self.ball;
-        let playground = self.playground;
-        if ball.x - ball.radius < f64::from(playground.left())
-            || ball.x + ball.radius > f64::from(playground.right())
-        {
-            self.vx = -self.vx;
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Left => self.decrement_counter(),
+            KeyCode::Right => self.increment_counter(),
+            KeyCode::Char('q') => self.exit(),
+            _ => {}
         }
-        if ball.y - ball.radius < f64::from(playground.top())
-            || ball.y + ball.radius > f64::from(playground.bottom())
-        {
-            self.vy = -self.vy;
-        }
-
-        self.ball.x += self.vx;
-        self.ball.y += self.vy;
     }
 
-    fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self.pong_canvas(), frame.area());
+    fn exit(&mut self) {
+        self.exit = true;
     }
 
-    fn pong_canvas(&self) -> impl Widget + '_ {
-        Canvas::default()
-            .block(Block::bordered().title("Pong"))
-            .paint(|ctx| {
-                ctx.draw(&self.ball);
-            })
-            .x_bounds([10.0, 210.0])
-            .y_bounds([10.0, 110.0])
+    fn increment_counter(&mut self) {
+        self.counter += 1;
+    }
+
+    fn decrement_counter(&mut self) {
+        self.counter -= 1;
+    }
+}
+
+impl Widget for &App {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let title = Line::from(" Counter App Tutorial ".bold());
+        let instructions = Line::from(vec![
+            " Decrement ".into(),
+            "<Left>".blue().bold(),
+            " Increment ".into(),
+            "<Right>".blue().bold(),
+            " Quit ".into(),
+            "<Q> ".blue().bold(),
+        ]);
+        let block = Block::bordered()
+            .title(title.centered())
+            .title_bottom(instructions.centered())
+            .border_set(border::THICK);
+
+        let counter_text = Text::from(vec![Line::from(vec![
+            "Value: ".into(),
+            self.counter.to_string().yellow(),
+        ])]);
+
+        Paragraph::new(counter_text)
+            .centered()
+            .block(block)
+            .render(area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::Style;
+
+    #[test]
+    fn render() {
+        let app = App::default();
+        let mut buf = Buffer::empty(Rect::new(0, 0, 50, 4));
+
+        app.render(buf.area, &mut buf);
+
+        let mut expected = Buffer::with_lines(vec![
+            "┏━━━━━━━━━━━━━ Counter App Tutorial ━━━━━━━━━━━━━┓",
+            "┃                    Value: 0                    ┃",
+            "┃                                                ┃",
+            "┗━ Decrement <Left> Increment <Right> Quit <Q> ━━┛",
+        ]);
+        let title_style = Style::new().bold();
+        let counter_style = Style::new().yellow();
+        let key_style = Style::new().blue().bold();
+        expected.set_style(Rect::new(14, 0, 22, 1), title_style);
+        expected.set_style(Rect::new(28, 1, 1, 1), counter_style);
+        expected.set_style(Rect::new(13, 3, 6, 1), key_style);
+        expected.set_style(Rect::new(30, 3, 7, 1), key_style);
+        expected.set_style(Rect::new(43, 3, 4, 1), key_style);
+
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn handle_key_event() -> io::Result<()> {
+        let mut app = App::default();
+        app.handle_key_event(KeyCode::Right.into());
+        assert_eq!(app.counter, 1);
+
+        app.handle_key_event(KeyCode::Left.into());
+        assert_eq!(app.counter, 0);
+
+        let mut app = App::default();
+        app.handle_key_event(KeyCode::Char('q').into());
+        assert!(app.exit);
+
+        Ok(())
     }
 }
