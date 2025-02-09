@@ -1,7 +1,4 @@
-use color_eyre::{
-    eyre::{bail, WrapErr},
-    Result,
-};
+use color_eyre::{eyre::WrapErr, Result};
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
@@ -30,7 +27,7 @@ fn main() -> Result<()> {
 
 #[derive(Debug, Default)]
 pub struct App {
-    counter: u8,
+    counter: i8,
     exit: bool,
 }
 
@@ -72,9 +69,6 @@ impl App {
 
     fn increment_counter(&mut self) -> Result<()> {
         self.counter += 1;
-        if self.counter > 2 {
-            bail!("counter overflow");
-        }
         Ok(())
     }
 
@@ -149,30 +143,11 @@ mod tests {
         assert_eq!(app.counter, 1);
 
         app.handle_key_event(KeyCode::Left.into()).unwrap();
-        assert_eq!(app.counter, 0);
+        app.handle_key_event(KeyCode::Left.into()).unwrap();
+        assert_eq!(app.counter, -1);
 
         let mut app = App::default();
         app.handle_key_event(KeyCode::Char('q').into()).unwrap();
         assert!(app.exit);
-    }
-
-    #[test]
-    #[should_panic(expected = "attempt to subtract with overflow")]
-    fn handle_key_event_panic() {
-        let mut app = App::default();
-        let _ = app.handle_key_event(KeyCode::Left.into());
-    }
-
-    #[test]
-    fn handle_key_event_overflow() {
-        let mut app = App::default();
-        assert!(app.handle_key_event(KeyCode::Right.into()).is_ok());
-        assert!(app.handle_key_event(KeyCode::Right.into()).is_ok());
-        assert_eq!(
-            app.handle_key_event(KeyCode::Right.into())
-                .unwrap_err()
-                .to_string(),
-            "counter overflow"
-        );
     }
 }
